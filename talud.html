@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="es">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width,initial-scale=1" />
+		<title>Talud — Simulador (GeoGebra-like)</title>
+		<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap">
+		<style>
+			:root{--bg:#ffffff;--panel:#f6f7fb;--muted:#6b7280;--accent:#0f63ff;--grid:#e6eef8}
+			html,body{height:100%;margin:0;background:linear-gradient(180deg,#f7fbff,#eef6ff);font-family:Inter,Arial,Helvetica,sans-serif;color:#0b1220}
+			.app{display:flex;flex-direction:column;height:100vh}
+			.toolbar{height:48px;background:#ffffff;border-bottom:1px solid #e6eef8;display:flex;align-items:center;padding:6px 12px;gap:12px}
+			.brand{font-weight:600;color:var(--accent)}
+			.main{flex:1;display:grid;grid-template-columns:380px 1fr;gap:12px;padding:12px}
+			.panel{background:var(--panel);border:1px solid var(--grid);border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(16,24,40,0.04)}
+			.controls h2{margin:0 0 8px;font-size:15px}
+			.control{margin-bottom:10px}
+			label{display:block;color:var(--muted);font-size:13px;margin-bottom:6px}
+			.row{display:flex;gap:8px;align-items:center}
+			input[type=range]{flex:1}
+			input[type=number]{width:84px;padding:6px;border-radius:6px;border:1px solid #e6eef8;background:white}
+			button{background:var(--accent);border:none;padding:8px 10px;border-radius:8px;color:white;cursor:pointer}
+			.geo-canvas{background:white;border-radius:6px;border:1px solid var(--grid);height:640px;display:flex}
+			.left-2d{flex:1;display:flex;flex-direction:column}
+			#plane{flex:1;border-bottom:1px solid var(--grid);}
+			.bottom-row{display:flex;gap:12px;margin-top:8px}
+			.small{font-size:13px;color:var(--muted)}
+			.results{margin-top:10px}
+			@media (max-width:1000px){.main{grid-template-columns:1fr;}.geo-canvas{height:520px}}
+		</style>
+		<!-- Three.js for optional 3D preview -->
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/three.min.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/examples/js/controls/OrbitControls.js"></script>
+	</head>
+	<body>
+		<div class="app">
+			<div class="toolbar">
+				<div class="brand">Talud · Simulador (GeoGebra-like)</div>
+				<div class="small">θ(z) = θ_a + α · (1 - e^{−β·z})</div>
+			</div>
+
+			<div class="main">
+				<aside class="panel controls">
+					<h2>Controles</h2>
+
+					<div class="control">
+						<label>θ_a (humedad base)</label>
+						<div class="row"><input id="thetaA" type="range" min="0" max="0.5" step="0.01" value="0.05"><input id="thetaA_n" type="number" min="0" max="0.5" step="0.01" value="0.05"></div>
+					</div>
+
+					<div class="control">
+						<label>α (amplitud)</label>
+						<div class="row"><input id="alpha" type="range" min="0" max="1" step="0.01" value="0.3"><input id="alpha_n" type="number" min="0" max="1" step="0.01" value="0.3"></div>
+					</div>
+
+					<div class="control">
+						<label>β (tasa)</label>
+						<div class="row"><input id="beta" type="range" min="0.1" max="6" step="0.05" value="1"><input id="beta_n" type="number" min="0.1" max="6" step="0.05" value="1"></div>
+					</div>
+
+					<hr>
+
+					<div class="control">
+						<label>Ancho W [m] (arrastrable)</label>
+						<div class="row"><input id="width" type="range" min="1" max="20" step="0.1" value="10"><input id="width_n" type="number" min="1" max="20" step="0.1" value="10"></div>
+					</div>
+
+					<div class="control">
+						<label>Altura H [m] (arrastrable)</label>
+						<div class="row"><input id="height" type="range" min="0.5" max="12" step="0.05" value="3"><input id="height_n" type="number" min="0.5" max="12" step="0.05" value="3"></div>
+					</div>
+
+					<div class="control">
+						<label>Profundidad D [m]</label>
+						<div class="row"><input id="depth" type="range" min="0.01" max="6" step="0.01" value="0.6"><input id="depth_n" type="number" min="0.01" max="6" step="0.01" value="0.6"></div>
+					</div>
+
+					<div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+						<button id="reset">Reset</button>
+						<div class="small">También puedes arrastrar los puntos en el plano para cambiar W y H.</div>
+					</div>
+
+					<div class="results">
+						<p>Volumen infiltrado: <strong id="vol">—</strong> m³</p>
+						<p>Masa (ρ=1000 kg/m³): <strong id="mass">—</strong> kg</p>
+						<p>Humedad promedio (0..D): <strong id="avg">—</strong></p>
+						<p>Centroide z: <strong id="zc">—</strong> m</p>
+					</div>
+				</aside>
+
+				<section class="panel geo-canvas">
+					<div class="left-2d" style="flex:1">
+						<canvas id="plane"></canvas>
+						<div class="bottom-row">
+							<canvas id="profileSmall" width="320" height="120" style="border-radius:6px;border:1px solid var(--grid);"></canvas>
+							<div style="flex:1">
+								<div class="small">Leyenda:</div>
+								<ul class="small">
+									<li style="color:#0f63ff">Azul: Volumen infiltrado (proyección en la sección)</li>
+									<li style="color:#8b6b46">Marrón: Talud (sección triangular)</li>
+								</ul>
+							</div>
+						</div>
+					</div>
+					<div id="threePreview" style="width:420px;margin-left:12px"></div>
+				</section>
+			</div>
+		</div>
+
+		<script>
+			// --- util y sincronización controles ---
+			const $ = sel => document.querySelector(sel);
+			const entries = ['thetaA','alpha','beta','width','height','depth'];
+			entries.forEach(id => {
+				const r = document.getElementById(id);
+				const n = document.getElementById(id + '_n');
+				r.addEventListener('input', ()=>{ n.value = r.value; onParamsChange(); });
+				n.addEventListener('input', ()=>{ r.value = n.value; onParamsChange(); });
+			});
+			document.getElementById('reset').addEventListener('click', ()=>{
+				const def = {thetaA:0.05,alpha:0.3,beta:1,width:10,height:3,depth:0.6};
+				Object.keys(def).forEach(k=>{ document.getElementById(k).value = def[k]; document.getElementById(k + '_n').value = def[k]; });
+				onParamsChange();
+			});
+
+			// theta profile
+			function theta(z,thetaA,alpha,beta){ return thetaA + alpha * (1 - Math.exp(-beta * z)); }
+
+			// Simpson for 1D
+			function integrateTheta(thetaA,alpha,beta,D,n=400){ if(D<=0) return 0; if(n%2) n++; const h=D/n; let s=theta(0,thetaA,alpha,beta)+theta(D,thetaA,alpha,beta); for(let i=1;i<n;i++){ const z=i*h; s += (i%2?4:2) * theta(z,thetaA,alpha,beta); } return s*(h/3); }
+
+			// integrate over triangular cross-section and extrude length L
+			function integrateCross(thetaA,alpha,beta,W,H,D,L=8){ const nX=160,nY=80; const dx=W/nX; let sum=0; for(let i=0;i<nX;i++){ const x=(i+0.5)*dx; const ymax=Math.max(0,H*(1-x/W)); const ylimit=Math.min(ymax,D); if(ylimit<=0) continue; const dy=ylimit/nY; let sY=0; for(let j=0;j<nY;j++){ const y=(j+0.5)*dy; sY += theta(y,thetaA,alpha,beta); } sY *= dy; sum += sY*dx; } return sum*L; }
+
+			// --- 2D plane drawing (GeoGebra-like) ---
+			const plane = document.getElementById('plane'); const ctx = plane.getContext('2d');
+			function resizePlane(){ plane.width = plane.clientWidth; plane.height = plane.clientHeight; drawPlane(); }
+			window.addEventListener('resize', resizePlane);
+
+			// world -> screen transforms
+			let world = {xMax:12, yMax:8}; // meters shown
+			function wx(x){ return (x / world.xMax) * plane.width; }
+			function wy(y){ return plane.height - (y / world.yMax) * plane.height; }
+
+			// draggable points for W and H on axes
+			let drag = null;
+			const handleRadius = 8;
+			function drawPlane(){
+				const p = getParams();
+				ctx.clearRect(0,0,plane.width,plane.height);
+				// grid
+				ctx.fillStyle = '#fff'; ctx.fillRect(0,0,plane.width,plane.height);
+				ctx.strokeStyle = '#eef6ff'; ctx.lineWidth=1;
+				for(let gx=0; gx<=world.xMax; gx+=1){ ctx.beginPath(); ctx.moveTo(wx(gx),0); ctx.lineTo(wx(gx),plane.height); ctx.stroke(); }
+				for(let gy=0; gy<=world.yMax; gy+=1){ ctx.beginPath(); ctx.moveTo(0,wy(gy)); ctx.lineTo(plane.width,wy(gy)); ctx.stroke(); }
+
+				// axes
+				ctx.strokeStyle = '#a8b4c8'; ctx.lineWidth=1.5;
+				ctx.beginPath(); ctx.moveTo(wx(0),wy(0)); ctx.lineTo(wx(world.xMax),wy(0)); ctx.stroke();
+				ctx.beginPath(); ctx.moveTo(wx(0),wy(0)); ctx.lineTo(wx(0),wy(world.yMax)); ctx.stroke();
+
+				// triangle (talud) coordinates: (0,0),(W,0),(0,H)
+				const W = p.W, H=p.H;
+				ctx.fillStyle = '#8b6b46'; ctx.globalAlpha = 0.14; ctx.beginPath(); ctx.moveTo(wx(0),wy(0)); ctx.lineTo(wx(W),wy(0)); ctx.lineTo(wx(0),wy(H)); ctx.closePath(); ctx.fill(); ctx.globalAlpha=1;
+				ctx.strokeStyle = '#7b5a3d'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(wx(0),wy(0)); ctx.lineTo(wx(W),wy(0)); ctx.lineTo(wx(0),wy(H)); ctx.closePath(); ctx.stroke();
+
+				// water shading up to depth D: fill inside triangle where y <= D
+				const D = Math.min(p.D, p.H);
+				// clip triangle
+				ctx.save(); ctx.beginPath(); ctx.moveTo(wx(0),wy(0)); ctx.lineTo(wx(W),wy(0)); ctx.lineTo(wx(0),wy(H)); ctx.closePath(); ctx.clip();
+				// draw vertical gradient of water using multiple thin bands that reflect θ(z)
+				const bands = 60;
+				for(let k=0;k<bands;k++){
+					const z0 = (k/bands) * D;
+					const z1 = ((k+1)/bands) * D;
+					const zc = (z0 + z1) / 2;
+					const th = theta(zc, p.thetaA, p.alpha, p.beta);
+					const alpha = 0.06 + 0.7 * Math.max(0, Math.min(th,1));
+					ctx.fillStyle = '#0f63ff'; ctx.globalAlpha = alpha;
+					const yTop = wy(z1);
+					const height = wy(0) - yTop;
+					ctx.fillRect(0, yTop, plane.width, height);
+				}
+				ctx.globalAlpha = 1; ctx.restore();
+
+				// draw draggable handles at (W,0) and (0,H)
+				drawHandle(wx(W), wy(0), 'W');
+				drawHandle(wx(0), wy(H), 'H');
+
+				// draw θ(z) curve on right small inset area
+				drawSmallProfile(p.thetaA,p.alpha,p.beta,p.D);
+			}
+
+			function drawHandle(sx,sy,label){ ctx.beginPath(); ctx.fillStyle='#fff'; ctx.strokeStyle='#0f63ff'; ctx.lineWidth=2; ctx.arc(sx,sy,handleRadius,0,Math.PI*2); ctx.fill(); ctx.stroke(); ctx.fillStyle='#0f1220'; ctx.font='12px Inter'; ctx.fillText(label, sx+10, sy-6); }
+
+			// mouse interaction
+			plane.addEventListener('mousedown', (ev)=>{ const r=plane.getBoundingClientRect(); const mx=ev.clientX - r.left, my=ev.clientY - r.top; const p=getParams(); const Wpx=wx(p.W), Hpx=wy(p.H); if(dist(mx,my,Wpx,wy(0))<12){ drag='W'; } else if(dist(mx,my,wx(0),Hpx)<12){ drag='H'; } });
+			window.addEventListener('mousemove', (ev)=>{ if(!drag) return; const r=plane.getBoundingClientRect(); const mx=ev.clientX - r.left, my=ev.clientY - r.top; if(drag==='W'){ // change W based on mx
+					const x = Math.max(0, Math.min(world.xMax, (mx/plane.width)*world.xMax)); document.getElementById('width').value = x.toFixed(2); document.getElementById('width_n').value = x.toFixed(2); onParamsChange(); }
+				if(drag==='H'){ const y = Math.max(0, Math.min(world.yMax, ((plane.height-my)/plane.height)*world.yMax)); document.getElementById('height').value = y.toFixed(2); document.getElementById('height_n').value = y.toFixed(2); onParamsChange(); } });
+			window.addEventListener('mouseup', ()=>{ drag=null; });
+			function dist(x1,y1,x2,y2){ return Math.hypot(x1-x2,y1-y2); }
+
+			// small profile drawing
+			const ps = document.getElementById('profileSmall'); const psctx = ps.getContext('2d');
+			function drawSmallProfile(thetaA,alpha,beta,D){ psctx.clearRect(0,0,ps.width,ps.height); psctx.fillStyle='#fff'; psctx.fillRect(0,0,ps.width,ps.height); psctx.strokeStyle='#eef6ff'; for(let gx=0;gx<=ps.width;gx+=40){ psctx.beginPath(); psctx.moveTo(gx,0); psctx.lineTo(gx,ps.height); psctx.stroke(); } psctx.strokeStyle='#60a5fa'; psctx.lineWidth=2; psctx.beginPath(); const steps=140; for(let i=0;i<=steps;i++){ const z = D*(i/steps); const th = theta(z,thetaA,alpha,beta); const x = (i/steps)*ps.width; const y = ps.height - th*ps.height; if(i===0) psctx.moveTo(x,y); else psctx.lineTo(x,y); } psctx.stroke(); }
+
+			function getParams(){ return {
+				thetaA: parseFloat(document.getElementById('thetaA').value),
+				alpha: parseFloat(document.getElementById('alpha').value),
+				beta: parseFloat(document.getElementById('beta').value),
+				W: parseFloat(document.getElementById('width').value),
+				H: parseFloat(document.getElementById('height').value),
+				D: parseFloat(document.getElementById('depth').value),
+				L: 8
+			}; }
+
+			function onParamsChange(){ const p=getParams(); // adapt world extents
+				world.xMax = Math.max(12, p.W * 1.2); world.yMax = Math.max(8, p.H * 1.2); resizePlane(); // compute results
+				const integral = integrateTheta(p.thetaA,p.alpha,p.beta,p.D,300); const thetaAvg = p.D>0 ? integral / p.D : 0; const V = integrateCross(p.thetaA,p.alpha,p.beta,p.W,p.H,p.D,p.L); const M = V*1000; // centroid
+				let zc=0; if(integral>0){ const n=300; const h=p.D/n; let s=0; for(let i=0;i<=n;i++){ const z=i*h; const coeff=(i===0||i===n)?1:(i%2?4:2); s += coeff * z * theta(z,p.thetaA,p.alpha,p.beta); } s *= (h/3); zc = s / integral; }
+				document.getElementById('vol').innerText = V.toExponential(4); document.getElementById('mass').innerText = M.toExponential(4); document.getElementById('avg').innerText = thetaAvg.toFixed(4); document.getElementById('zc').innerText = zc.toFixed(3);
+				drawPlane(); update3DPreview(); }
+
+			// --- simple 3D preview (extruded triangular prism) ---
+			let scene, camera, renderer, controls, slope, water;
+			function init3D(){ const container = document.getElementById('threePreview'); const w = 420, h = 420; renderer = new THREE.WebGLRenderer({antialias:true,alpha:true}); renderer.setSize(w,h); container.appendChild(renderer.domElement); scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(40, w/h, 0.1, 1000); camera.position.set(12,8,18); controls = new THREE.OrbitControls(camera, renderer.domElement); scene.add(new THREE.AmbientLight(0x888888)); const dir = new THREE.DirectionalLight(0xffffff,0.8); dir.position.set(6,10,4); scene.add(dir); animate3D(); }
+			function createSlopeMesh(W,H,L){ const shape=new THREE.Shape(); shape.moveTo(0,0); shape.lineTo(W,0); shape.lineTo(0,H); shape.closePath(); const geom=new THREE.ExtrudeGeometry(shape,{steps:1,depth:L,bevelEnabled:false}); const mat=new THREE.MeshStandardMaterial({color:0x8b6b46}); const m=new THREE.Mesh(geom,mat); m.position.x = -W/2; m.position.z = -L/2; return m; }
+			function createWaterMesh(W,H,L,D,thetaA,alpha,beta,nSlices=24){
+				// create a group of thin extruded slices; each slice opacity/color depends on theta at its center
+				const group = new THREE.Group();
+				const depth = Math.min(D,H);
+				if(depth <= 0) return group;
+				const sliceH = depth / nSlices;
+				for(let i=0;i<nSlices;i++){
+					const z0 = i * sliceH;
+					const zc = z0 + sliceH*0.5;
+					const th = theta(zc, thetaA, alpha, beta);
+					const shape = new THREE.Shape(); shape.moveTo(0,0); shape.lineTo(W,0); shape.lineTo(0,sliceH); shape.closePath();
+					const geom = new THREE.ExtrudeGeometry(shape, {steps:1, depth:L, bevelEnabled:false});
+					const color = new THREE.Color(0x1f78ff);
+					color.lerp(new THREE.Color(0xa7d2ff), Math.max(0, Math.min(th,1)));
+					const opacity = 0.06 + 0.8 * Math.max(0, Math.min(th,1));
+					const mat = new THREE.MeshStandardMaterial({color: color, transparent: true, opacity: opacity, side: THREE.DoubleSide});
+					const mesh = new THREE.Mesh(geom, mat);
+					mesh.position.x = -W/2;
+					mesh.position.z = -L/2;
+					mesh.position.y = z0;
+					group.add(mesh);
+				}
+				return group;
+			}
+
+			function update3DPreview(){
+				const p = getParams();
+				if(!scene) return;
+				if(slope){ scene.remove(slope); if(slope.geometry) slope.geometry.dispose(); }
+				if(water){ scene.remove(water); // dispose children
+					if(water.children){ water.children.forEach(ch=>{ if(ch.geometry) ch.geometry.dispose(); if(ch.material) ch.material.dispose(); }); }
+				}
+				slope = createSlopeMesh(p.W,p.H,p.L); scene.add(slope);
+				const integral = integrateTheta(p.thetaA,p.alpha,p.beta,p.D,300);
+				const thetaAvg = p.D>0 ? integral / p.D : 0;
+				water = createWaterMesh(p.W,p.H,p.L,Math.min(p.D,p.H), p.thetaA, p.alpha, p.beta, 28);
+				scene.add(water);
+			}
+			function animate3D(){ requestAnimationFrame(animate3D); renderer.render(scene,camera); }
+
+			// init
+			init3D(); onParamsChange();
+
+		</script>
+        <p>Fabian Andrade Hernandez y Jesus Abel Sol Reyes</p>
+	</body>
+</html>
